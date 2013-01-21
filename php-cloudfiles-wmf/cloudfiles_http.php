@@ -202,11 +202,13 @@ class CF_Http {
     public function authenticate( $user, $pass, $host = NULL ) {
 		$path = array( );
 		$headers = array(
-			sprintf( "%s: %s", AUTH_USER_HEADER, $user ),
-			sprintf( "%s: %s", AUTH_KEY_HEADER, $pass ),
+			sprintf( "%s: %s", 'Content-type', 'application/json' ),
 		);
+		$usertenant = explode(':', $user);
+		$data = sprintf('{"auth":{"passwordCredentials":{"username": "%s", "password": "%s"},"tenantId": "%s"}}', $usertenant[0], $pass, $usertenant[1]);
+		
 		$path[] = $host;
-		$path[] = "v1.0";
+        $path[] = 'tokens';
 		$url = implode( "/", $path );
 
 		$curl_ch = curl_init();
@@ -214,6 +216,9 @@ class CF_Http {
 			curl_setopt( $curl_ch, CURLOPT_SSL_VERIFYPEER, True );
 			curl_setopt( $curl_ch, CURLOPT_CAINFO, $this->cabundle_path );
 		}
+		
+        error_log('auth url ' . $url);
+        error_log('data ' . $data);
 		curl_setopt( $curl_ch, CURLOPT_VERBOSE, $this->dbug );
 		curl_setopt( $curl_ch, CURLOPT_FOLLOWLOCATION, 1 );
 		curl_setopt( $curl_ch, CURLOPT_MAXREDIRS, 4 );
@@ -225,12 +230,24 @@ class CF_Http {
 		curl_setopt( $curl_ch, CURLOPT_CONNECTTIMEOUT, 10 );
 		curl_setopt( $curl_ch, CURLOPT_TIMEOUT, 10 );
 		curl_setopt( $curl_ch, CURLOPT_URL, $url );
-		if ( curl_exec( $curl_ch ) === false ) {
-			$this->response_reason = "(curl error: " . curl_errno( $curl_ch ) . ") ";
-			$this->response_reason .= curl_error( $curl_ch );
-		}
+		curl_setopt( $curl_ch, CURLOPT_POST, 1); 
+        curl_setopt( $curl_ch, CURLOPT_POSTFIELDS, $data); 
+        #curl_exec( $curl_ch );
+        $raw = curl_exec( $curl_ch );
 		curl_close( $curl_ch );
 
+        error_log('raw: ' . $raw);
+        $response = json_decode($raw);
+        #error_log('response: ' . $response);
+        $this->auth_token = $response->{'access'}->{'token'}->{'id'};
+        
+        foreach($response->{'access'}->{'serviceCatalog'} as $catalog_item) {
+            if ($catalog_item->{'type'} == "object-store"){
+                $this->storage_url = $catalog_item->{'endpoints'}[0]->{'publicURL'};
+            }
+        }
+        error_log('auth_token: ' . $this->auth_token);
+        error_log('storage_url: ' . $this->storage_url);
 		return array( $this->response_status, $this->response_reason,
 			$this->storage_url, $this->cdnm_url, $this->auth_token );
 	}
@@ -1214,15 +1231,6 @@ class CF_Http {
 		}
 		if ( isset( $matches[2] ) ) {
 			$this->response_reason = $matches[2];
-		}
-		if ( stripos( $header, STORAGE_URL ) === 0 ) {
-			$this->storage_url = trim( substr( $header, strlen( STORAGE_URL ) + 1 ) );
-		}
-		if ( stripos( $header, CDNM_URL ) === 0 ) {
-			$this->cdnm_url = trim( substr( $header, strlen( CDNM_URL ) + 1 ) );
-		}
-		if ( stripos( $header, AUTH_TOKEN ) === 0 ) {
-			$this->auth_token = trim( substr( $header, strlen( AUTH_TOKEN ) + 1 ) );
 		}
 		return strlen( $header );
 	}
